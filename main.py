@@ -4,24 +4,17 @@ import pickle
 from os import path as os_path, mkdir as os_mkdir, remove as os_remove
 from datetime import datetime
 import sys, getopt
+import boto3
 
 app = Flask("Champagne")
 Markdown(app)
-
+dynamodb = boto3.resource('dynamodb')
+table = dynamodb.Table('notes')
 noteList = []
 
-noteDir = "notes"
-
-# create note directory if it doesn't exist
-if not os_path.exists(noteDir):
-    os_mkdir(noteDir)
-
-noteListFileName = os_path.join(noteDir, "notes.pkl")
-
-# check for existing file with note metadata
-if os_path.exists(noteListFileName):
-    with open(noteListFileName, 'rb') as notesFile:
-        noteList = pickle.load(notesFile)
+print("Getting all notes from dynamodb")
+noteList = table.scan()['Items']
+print(noteList)
 
 
 @app.route("/")
@@ -41,8 +34,6 @@ def createNote():
     else:
         noteId = "1"
 
-    noteFileName = os_path.join(noteDir, noteId+".pkl")
-
     lastModifiedDate = datetime.now()
     lastModifiedDate = lastModifiedDate.strftime("%d-%b-%Y %H:%M:%S")
 
@@ -51,34 +42,29 @@ def createNote():
 
     note = {'id': noteId, 'title': noteTitle, 'lastModifiedDate': lastModifiedDate, 'message': noteMessage}
 
-    # save the note
-    with open(noteFileName, 'wb') as noteFile:
-        pickle.dump(note, noteFile)
+    print("Creating note")
+    table.put_item(Item=note)
 
     # add metadata to list of notes for display on home page
     noteList.append({'id': noteId, 'title': noteTitle, 'lastModifiedDate': lastModifiedDate})
 
-    # save changes to the file containing the list of note metadata
-    with open(noteListFileName, 'wb') as notesFile:
-        pickle.dump(noteList, notesFile)
 
     return redirect(url_for('viewNote', noteId=noteId))
 
 @app.route("/viewNote/<int:noteId>")
 def viewNote(noteId):
     noteId = str(noteId)
-    noteFileName = os_path.join(noteDir, noteId+".pkl")
-    with open(noteFileName, 'rb') as noteFile:
-        note = pickle.load(noteFile)
+
+    print("Getting note")
+    note = table.get_item(Key={'id': noteId})['Item']
 
     return render_template("viewNote.html", note=note, submitAction="/saveNote")
 
 @app.route("/editNote/<int:noteId>")
 def editNote(noteId):
     noteId = str(noteId)
-    noteFileName = os_path.join(noteDir, noteId+".pkl")
-    with open(noteFileName, 'rb') as noteFile:
-        note = pickle.load(noteFile)
+
+    note = table.get_item(Key={'id': noteId})['Item']
 
     cancelUrl = url_for('viewNote', noteId=noteId)
     return render_template("noteForm.html", headerLabel="Edit Note", note=note, submitAction="/saveNote", cancelUrl=cancelUrl)
@@ -92,13 +78,11 @@ def saveNote():
     noteTitle = request.form['noteTitle']
     noteMessage = request.form['noteMessage']
 
-    noteFileName = os_path.join(noteDir, noteId+".pkl")
 
     note = {'id': noteId, 'title': noteTitle, 'lastModifiedDate': lastModifiedDate, 'message': noteMessage}
 
-    # save the note
-    with open(noteFileName, 'wb') as noteFile:
-        pickle.dump(note, noteFile)
+    print("Saving note")
+    table.put_item(Item=note)
 
     # remove the old version of the note from the list of note metadata and add the new version
     global noteList
@@ -108,26 +92,19 @@ def saveNote():
     # add metadata to list of notes for display on home page
     noteList.append({'id': noteId, 'title': noteTitle, 'lastModifiedDate': lastModifiedDate})
 
-    # save changes to the file containing the list of note metadata
-    with open(noteListFileName, 'wb') as notesFile:
-        pickle.dump(noteList, notesFile)
-
     return redirect(url_for('viewNote', noteId=noteId))
 
 @app.route("/deleteNote/<int:noteId>")
 def deleteNote(noteId):
-    # delete the note file
-    noteFileName = os_path.join(noteDir, noteId+".pkl")
-    os_remove(noteFileName)
+    print("type of noteid")
+    print(type(noteId))
+    table.delete_item(Key={'id': str(noteId)})
 
     # remove the note from the list of note metadata
     global noteList
-    newNoteList = [ i for i in noteList if not (i['id'] == noteId) ]
+    newNoteList = [ i for i in noteList if not (i['id'] == str(noteId)) ]
     noteList = newNoteList
 
-    # save changes to the file containing the list of note metadata
-    with open(noteListFileName, 'wb') as notesFile:
-        pickle.dump(noteList, notesFile)
 
     return redirect("/")
 
